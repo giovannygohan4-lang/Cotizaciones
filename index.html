@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Solicitudes y cotizaciones de inventario</title>
+<style>
+:root{--bg:#EEF1F0;--surface:#fff;--ink:#1B2A2F;--muted:#5B6B70;--line:#D3DBDA;--accent:#1F5F6B;--accent-ink:#fff;--cruce:#E3EFF0;--warn:#9A3412;--warn-bg:#FDEBDD;--ok:#166534;color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111A1D;--surface:#182428;--ink:#E6EEEE;--muted:#93A5A9;--line:#2B3C41;--accent:#5FB3C1;--accent-ink:#0B1A1D;--cruce:#1C3338;--warn:#F5B27D;--warn-bg:#3A2616;--ok:#7BD59A;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 22px;max-width:75ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:20px;margin-bottom:20px}
+.panel h2{font-size:16px;margin:0 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.grid.cfg{grid-template-columns:2fr 1fr}
+@media(max-width:640px){.grid.cfg{grid-template-columns:1fr}}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+input,textarea{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+button{font:inherit;font-weight:500;padding:9px 16px;border-radius:4px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button:disabled{opacity:.6;cursor:wait}
+.msg{margin-top:12px;font-size:14px;min-height:20px}
+.msg.err{color:var(--warn)}.msg.ok{color:var(--ok)}
+.bar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.bar h2{margin:0}.bar .actions{margin:0}
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+table{border-collapse:collapse;width:100%;min-width:1100px;font-size:14px}
+th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{background:var(--bg);font-size:13px;color:var(--muted)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+tr.cruce td{background:var(--cruce)}
+tr.cruce td:first-child{box-shadow:inset 4px 0 0 var(--accent)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:500;border:1px solid var(--line)}
+.tag.c{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.indent{padding-left:18px}
+.low{color:var(--warn);background:var(--warn-bg);padding:1px 6px;border-radius:3px;font-weight:500}
+.note{color:var(--muted);font-size:12px;margin-left:6px}
+.na{color:var(--warn)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+textarea{resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+.errs{margin:10px 0 0;padding-left:20px;font-size:13px;color:var(--warn)}
+.gt{min-width:860px}
+.gt td{padding:4px}
+.gt input{padding:6px 8px;min-width:100px}
+.gt td:first-child input{min-width:70px}
+.gt button.x{padding:4px 9px;color:var(--muted)}
+tr.bad td{background:var(--warn-bg)}
+.status{font-size:13px;color:var(--muted);margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Solicitudes y cotizaciones de inventario</h1>
+  <p class="sub">Procesa solicitudes: la app busca en tu base de Google Sheets el código cruce, el stock, el precio y el RUT a cotizar de cada código.</p>
+
+  <!-- ===== Base de datos ===== -->
+  <section class="panel">
+    <h2>Base de datos (Google Sheets en vivo)</h2>
+    <p class="sub" style="margin-bottom:12px">La app lee directamente tu Google Sheet cada vez que se abre y antes de procesar una solicitud, así que siempre usa los datos actuales. Las pestañas deben llamarse Cruce_Codigos, Inventario, Historico_Precios y Proveedores.</p>
+    <div class="actions" style="margin-top:0"><button class="primary" id="btn-sync">Actualizar desde Google Sheets</button></div>
+    <div class="status" id="status">Conectando con Google Sheets…</div>
+    <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted);font-size:13px">Ver detalle de lo que se leyó del Sheet</summary><pre id="diag" class="mono" style="white-space:pre-wrap;font-size:12px;margin:8px 0 0"></pre>
+      <label for="probe" style="margin-top:12px">Probar un código: muestra dónde lo encuentra (o no) en cada pestaña</label>
+      <div class="actions" style="margin-top:0"><input id="probe" placeholder="Ej: 11Q7-7101" autocomplete="off" style="max-width:260px"><button id="btn-probe">Probar código</button></div>
+      <pre id="probe-out" class="mono" style="white-space:pre-wrap;font-size:12px;margin:8px 0 0"></pre></details>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:13px">Conexión con Apps Script (la más confiable: lee los valores tal como se ven en el Sheet)</summary>
+      <div style="margin-top:12px">
+        <ol class="sub" style="margin:0 0 10px;padding-left:20px;line-height:1.6">
+          <li>En tu Google Sheet entra a <b>Extensiones &gt; Apps Script</b>.</li>
+          <li>Borra el código que aparece, pega el código de abajo y guarda (Ctrl+S).</li>
+          <li><b>Implementar &gt; Nueva implementación</b>, tipo <b>Aplicación web</b>. Ejecutar como: <b>Yo</b>. Quién tiene acceso: <b>Cualquier persona</b>. Pulsa Implementar y autoriza los permisos.</li>
+          <li>Copia la <b>URL de la aplicación web</b> (termina en /exec) y pégala más abajo.</li>
+          <li><b>Si ya tenías el script implementado:</b> después de pegar el código nuevo ve a Implementar &gt; Administrar implementaciones &gt; lápiz &gt; Versión: <b>Nueva versión</b> &gt; Implementar, y autoriza el permiso adicional (conexión externa y edición del Sheet).</li>
+        </ol>
+        <pre id="gs-code" class="mono" style="white-space:pre-wrap;font-size:12px;margin:0;padding:10px;border:1px solid var(--line);border-radius:4px;background:var(--bg)">// ===== LECTURA (igual que antes) =====
+function doGet(e) {
+  // Modo prueba: TU_URL/exec?probar=ARS9839  -&gt; muestra que encuentra y que intento
+  if (e &amp;&amp; e.parameter &amp;&amp; e.parameter.probar) {
+    var log = [];
+    var eq = buscarEquivalente_(String(e.parameter.probar).trim(), log);
+    return respuesta_({ codigo: e.parameter.probar, resultado: eq, intentos: log });
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var nombres = ["Cruce_Codigos", "Inventario", "Historico_Precios", "Proveedores"];
+  var salida = {};
+  nombres.forEach(function (n) {
+    var hoja = ss.getSheetByName(n);
+    salida[n] = hoja ? hoja.getDataRange().getDisplayValues() : null;
+  });
+  return ContentService.createTextOutput(JSON.stringify(salida))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ===== REGISTRO AUTOMATICO DE CODIGOS NUEVOS EN Cruce_Codigos =====
+var HOJA_CRUCE = "Cruce_Codigos";
+var PREFIJOS_FG = "AF|LF|FF|FS|HF|WF|FK|AH|CV|DZ|ST|SP|UF|CC|AS|FH|FA|DA|WA|AA|PA";
+
+function claveCodigo_(s) {
+  return String(s == null ? "" : s).toUpperCase().replace(/[\s\-_.\/\u00a0]/g, "");
+}
+function respuesta_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Busca el codigo en FilterFinder. Cada codigo de la competencia tiene su pagina
+// (/products/&lt;codigo&gt;) y el codigo Fleetguard aparece en la lista de ofertas de esa pagina.
+var DOMINIOS_FF = ["https://www.filterfinderonline.com", "https://filterfinder.co.uk", "https://www.filterfinder.ie"];
+
+function handles_(codigo) {
+  var c = String(codigo).toLowerCase().trim();
+  var a = c.replace(/[^a-z0-9]/g, "");
+  var b = c.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  var out = [a];
+  if (b &amp;&amp; b !== a) out.push(b);
+  return out;
+}
+
+function fleetguardDePagina_(j) {
+  var ofertas = j.offers || [];
+  for (var i = 0; i &lt; ofertas.length; i++) {
+    var o = ofertas[i];
+    if (/fleetguard/i.test(o.title || "") &amp;&amp; o.sku) return String(o.sku).replace(/\s+/g, "").toUpperCase();
+  }
+  var re = new RegExp("\\b(" + PREFIJOS_FG + ")\\d{3,6}[A-Z]{0,3}\\b", "i");
+  if (/fleetguard/i.test(j.title || "")) {
+    var m = String(j.title).match(re);
+    if (m) return m[0].toUpperCase();
+  }
+  return null;
+}
+
+function pedirJson_(reqs, log) {
+  var resp = [];
+  try { resp = UrlFetchApp.fetchAll(reqs); } catch (err) { log.push("fetchAll error: " + err); return []; }
+  return resp.map(function (r, i) {
+    var cod = r.getResponseCode();
+    log.push(cod + " " + reqs[i].url);
+    if (cod !== 200) return null;
+    try { return JSON.parse(r.getContentText()); } catch (x) { return null; }
+  });
+}
+
+function buscarEquivalente_(codigo, log) {
+  log = log || [];
+  var kc = claveCodigo_(codigo);
+  var opts = { muteHttpExceptions: true, followRedirects: true, headers: { "Accept": "application/json" } };
+  function req(url) { return { url: url, muteHttpExceptions: true, followRedirects: true, headers: { "Accept": "application/json" } }; }
+  try {
+    // 1) Pagina directa del codigo en cada dominio
+    var reqs = [];
+    DOMINIOS_FF.forEach(function (d) {
+      handles_(codigo).forEach(function (h) { reqs.push(req(d + "/products/" + encodeURIComponent(h) + ".oembed")); });
+    });
+    var res = pedirJson_(reqs, log);
+    for (var i = 0; i &lt; res.length; i++) {
+      if (res[i]) {
+        var fg = fleetguardDePagina_(res[i]);
+        if (fg) return { cruce: fg, fuente: "FilterFinder" };
+      }
+    }
+    // 2) Buscador del sitio: encuentra la pagina aunque el nombre (handle) sea distinto
+    var rs = DOMINIOS_FF.map(function (d) {
+      return req(d + "/search/suggest.json?q=" + encodeURIComponent(codigo) + "&amp;resources[type]=product&amp;resources[limit]=5");
+    });
+    var sug = pedirJson_(rs, log);
+    var reqs2 = [];
+    sug.forEach(function (j, idx) {
+      var prods = (((j || {}).resources || {}).results || {}).products || [];
+      prods.forEach(function (p) {
+        if (reqs2.length &lt; 6 &amp;&amp; claveCodigo_((p.title || "") + (p.handle || "")).indexOf(kc) &gt;= 0) {
+          reqs2.push(req(DOMINIOS_FF[idx] + "/products/" + encodeURIComponent(p.handle) + ".oembed"));
+        }
+      });
+    });
+    if (reqs2.length) {
+      var res2 = pedirJson_(reqs2, log);
+      for (var k = 0; k &lt; res2.length; k++) {
+        if (res2[k]) {
+          var fg2 = fleetguardDePagina_(res2[k]);
+          if (fg2) return { cruce: fg2, fuente: "FilterFinder" };
+        }
+      }
+    }
+  } catch (err) { log.push("error: " + err); }
+  return null;
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+    var req = JSON.parse(e.postData.contents);
+    if (req.accion !== "registrar" || !Array.isArray(req.codigos)) {
+      return respuesta_({ ok: false, error: "Solicitud no valida" });
+    }
+    var hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_CRUCE);
+    if (!hoja) return respuesta_({ ok: false, error: "No existe la hoja " + HOJA_CRUCE });
+
+    var existentes = {};
+    hoja.getDataRange().getValues().forEach(function (f, i) {
+      if (i &gt; 0) existentes[claveCodigo_(f[0])] = true;
+    });
+
+    var fecha = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd-MM-yyyy");
+    var resultados = [], filas = [];
+    req.codigos.slice(0, 20).forEach(function (c) {
+      c = String(c).trim();
+      var kc = claveCodigo_(c);
+      if (!kc || c.length &gt; 40 || !/^[A-Za-z0-9 \-_.\/]+$/.test(c)) return;
+      if (existentes[kc]) { resultados.push({ original: c, cruce: "", estado: "existente" }); return; }
+      existentes[kc] = true;
+      var eq = buscarEquivalente_(c);
+      filas.push([c, eq ? eq.cruce : "Sin cruce", eq ? "Auto " + eq.fuente + " " + fecha : "Auto sin resultado " + fecha]);
+      resultados.push({ original: c, cruce: eq ? eq.cruce : "", estado: "nuevo" });
+    });
+
+    if (filas.length) {
+      if (!hoja.getRange(1, 3).getValue()) hoja.getRange(1, 3).setValue("Origen");
+      hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, 3).setNumberFormat("@").setValues(filas);
+    }
+    return respuesta_({ ok: true, resultados: resultados });
+  } catch (err) {
+    return respuesta_({ ok: false, error: String(err) });
+  } finally {
+    try { lock.releaseLock(); } catch (x) {}
+  }
+}
+</pre>
+        <div class="actions" style="margin-top:8px"><button id="btn-copygs">Copiar código</button></div>
+        <label for="scripturl" style="margin-top:14px">URL de la aplicación web</label>
+        <input id="scripturl" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" spellcheck="false">
+        <div class="actions"><button class="primary" id="btn-savescript">Guardar y conectar</button><button id="btn-clearscript">Quitar y volver a la lectura directa</button></div>
+      </div>
+    </details>
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:13px">Opciones avanzadas (otro Sheet o carga manual de Excel)</summary>
+      <div style="margin-top:12px">
+        <label for="sheetid">ID o enlace del Google Sheet</label>
+        <input id="sheetid" autocomplete="off" spellcheck="false">
+        <div class="actions"><button id="btn-saveid">Guardar y conectar</button></div>
+        <label for="file" style="margin-top:16px">Plan B sin internet: cargar un Excel descargado (.xlsx)</label>
+        <div class="actions" style="margin-top:0"><input id="file" type="file" accept=".xlsx,.xls" style="max-width:420px"><button id="btn-plantilla">Descargar plantilla vacía</button></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- ===== Formulario ===== -->
+  <section class="panel">
+    <h2>Nueva solicitud</h2>
+    <div class="grid">
+      <div><label for="cant">Cantidad</label><input id="cant" type="number" min="1" step="any" value="1"></div>
+      <div><label for="cod">Código material</label><input id="cod" placeholder="Ej: MAT-1001" autocomplete="off"></div>
+      <div><label for="sol">Nº solicitud</label><input id="sol" autocomplete="off"></div>
+      <div><label for="fecha">Fecha</label><input id="fecha" type="date"></div>
+      <div><label for="faena">Faena despacho</label><input id="faena" list="faenas" placeholder="Ej: Escondida" autocomplete="off"><datalist id="faenas"></datalist></div>
+      <div><label for="comp">Comprador / indicador</label><input id="comp" list="compradores" placeholder="Ej: C01" autocomplete="off"><datalist id="compradores"></datalist></div>
+    </div>
+    <div class="actions"><button class="primary" id="btn-run">Procesar solicitud</button></div>
+    <div class="msg" id="msg" role="status"></div>
+  </section>
+
+  <!-- ===== Carga masiva ===== -->
+  <section class="panel">
+    <h2>Carga masiva de solicitudes</h2>
+    <p class="sub" style="margin-bottom:12px">Escribe directamente en la tabla o pega filas copiadas desde Excel o Google Sheets: al pegar en una celda se llenan varias filas y columnas de una vez. Enter baja a la siguiente fila. Al procesar, las filas correctas pasan a Resultados y las que tengan errores quedan marcadas para corregirlas.</p>
+    <div class="tablebox">
+      <table class="gt">
+        <thead><tr><th>Cantidad</th><th>Código material</th><th>Nº solicitud</th><th>Fecha (dd-mm-aaaa)</th><th>Faena despacho</th><th>Comprador</th><th></th></tr></thead>
+        <tbody id="grid-body"></tbody>
+      </table>
+    </div>
+    <div class="actions"><button class="primary" id="btn-bulk">Procesar tabla</button><button id="btn-addrow">+ Agregar fila</button><button id="btn-bulk-clear">Vaciar tabla</button></div>
+    <div class="msg" id="msg-bulk" role="status"></div>
+    <ul class="errs" id="bulk-errs"></ul>
+  </section>
+
+  <!-- ===== Resultados ===== -->
+  <section class="panel">
+    <div class="bar">
+      <h2>Resultados</h2>
+      <div class="actions">
+        <button class="primary" id="btn-copy">Copiar tabla</button>
+        <button id="btn-csv">Exportar a Excel (CSV)</button>
+        <button id="btn-clear">Limpiar registros</button>
+      </div>
+    </div>
+    <label for="chk-todo" style="display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--ink)"><input type="checkbox" id="chk-todo" style="width:auto"> Ver todo (incluye códigos originales y cruces sin stock)</label>
+    <div class="msg" id="msg-res" role="status"></div>
+    <div class="tablebox">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+/* =========================================================
+   1. UTILIDADES
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const nf = n => Number(n).toLocaleString("es-CL", { maximumFractionDigits: 2 });
+const money = n => "$" + nf(n);
+// Normaliza claves/encabezados: "Código_Original " -> "codigooriginal"
+const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// Normaliza códigos para comparar: sin espacios y en mayúsculas
+const k = s => String(s ?? "").replace(/[\u00a0\u200b-\u200d\ufeff]/g, " ").trim().toUpperCase();
+// Clave de comparación para códigos: ignora espacios, guiones, puntos y barras
+const kcod = s => k(s).replace(/[\s\-_.\/]/g, "");
+// Convierte "1.234,50" o 1234.5 a número; devuelve null si está vacío o no es número
+function num(v) {
+  if (v === "" || v == null) return null;
+  if (typeof v === "number") return v;
+  let s = String(v).replace(/[^\d,.\-]/g, "");
+  if (s.includes(",") && s.includes(".")) { // con ambos símbolos, el último es el decimal: "1.234,50" y "1,234.50"
+    s = s.lastIndexOf(",") > s.lastIndexOf(".") ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  } else {
+    if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ""); // "1.234" o "1.234.567" = miles (formato Chile)
+    s = s.replace(",", ".");
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+function msg(t, cls) { $("msg").textContent = t; $("msg").className = "msg " + (cls || ""); }
+function guardar(key, val) { try { localStorage.setItem(key, val); } catch (e) {} }
+function leer(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } }
+
+/* =========================================================
+   2. CONEXIÓN DIRECTA CON GOOGLE SHEETS
+   Lee cada pestaña con el endpoint público de Google (gviz, formato CSV).
+   Requiere que el Sheet esté compartido como "Cualquier persona con el enlace: Lector".
+   ========================================================= */
+const SHEET_ID_DEFAULT = "1BgDNOyi6uMSHmr43YnR_6Ob3HbWPZpOtyyLWWT8Pk-4";
+const APPS_SCRIPT_URL = ""; // opcional: pega aquí la URL /exec para que todos los equipos la usen sin configurar nada
+const TABS = ["Cruce_Codigos", "Inventario", "Historico_Precios", "Proveedores"];
+const REFRESCO_MS = 60000; // vuelve a leer el Sheet si los datos tienen más de 1 minuto
+let DB = null, ultimaCarga = 0, cargando = null;
+
+function idDesdeTexto(t) {
+  t = String(t || "").trim();
+  const m = t.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : t;
+}
+function scriptUrl() { return (leer("scriptUrl") || APPS_SCRIPT_URL).trim(); }
+function sheetId() { return idDesdeTexto(leer("sheetId")) || SHEET_ID_DEFAULT; }
+
+// Parser CSV que respeta comillas, comas y saltos de línea dentro de celdas
+function parseCSV(t, sep = ",") {
+  const rows = []; let r = [], c = "", q = false;
+  t = t.replace(/^\ufeff/, "");
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (q) {
+      if (ch === '"') { if (t[i + 1] === '"') { c += '"'; i++; } else q = false; } else c += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === sep) { r.push(c); c = ""; }
+    else if (ch === "\n" || ch === "\r") { if (ch === "\r" && t[i + 1] === "\n") i++; r.push(c); rows.push(r); r = []; c = ""; }
+    else c += ch;
+  }
+  if (c !== "" || r.length) { r.push(c); rows.push(r); }
+  return rows;
+}
+function csvAObjetos(t) { return filasAObjetos(parseCSV(t)); }
+function filasAObjetos(rows) {
+  rows = rows.filter(r => r.some(x => String(x ?? "").trim() !== ""));
+  if (!rows.length) return [];
+  const head = rows[0].map(h => String(h ?? ""));
+  return rows.slice(1).map(r => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+}
+// Apps Script: devuelve cada pestaña como matriz de valores tal como se ven en el Sheet (sin adivinar tipos)
+async function leerAppsScript(url) {
+  let res;
+  try { res = await fetch(url + (url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" }); } catch (e) { throw new Error("RED:Apps Script"); }
+  if (!res.ok) throw new Error(`HTTP ${res.status} en Apps Script`);
+  let j; try { j = JSON.parse(await res.text()); } catch (e) { throw new Error("privado"); }
+  const data = {};
+  TABS.forEach(n => data[n] = Array.isArray(j[n]) ? filasAObjetos(j[n]) : []);
+  return data;
+}
+async function leerPestana(id, nombre) {
+  const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(nombre)}`;
+  let res;
+  try { res = await fetch(url, { cache: "no-store" }); } catch (e) { throw new Error("RED:" + nombre); }
+  if (!res.ok) throw new Error(`HTTP ${res.status} en ${nombre}`);
+  const txt = await res.text();
+  if (/^\s*<(!doctype|html)/i.test(txt)) throw new Error("privado");
+  return csvAObjetos(txt);
+}
+function hora(ts) { return new Date(ts).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" }); }
+function resumen(db) { return `${db.inv.size} códigos en inventario, ${db.cruces.size} cruces, ${db.hist.size} precios históricos, ${db.prov.length} reglas de RUT` + (db.warn.length ? ". ⚠ " + db.warn.join(" ") : ""); }
+
+async function sincronizar() {
+  if (cargando) return cargando;
+  cargando = (async () => {
+    const btn = $("btn-sync"); btn.disabled = true;
+    $("status").textContent = "Leyendo Google Sheets…";
+    try {
+      const id = sheetId(), url = scriptUrl();
+      let data = {};
+      if (url) data = await leerAppsScript(url);
+      else { const res = await Promise.all(TABS.map(n => leerPestana(id, n).then(r => [n, r]))); res.forEach(([n, r]) => data[n] = r); }
+      const vacias = TABS.filter(n => !data[n].length);
+      if (vacias.length === TABS.length) throw new Error("vacío");
+      DB = indexar(data); ultimaCarga = Date.now(); poblarListas(DB);
+      guardar("cacheDB", JSON.stringify({ id, ts: ultimaCarga, data }));
+      $("status").textContent = `Conectado a Google Sheets (actualizado ${hora(ultimaCarga)}): ${resumen(DB)}.` +
+        (vacias.length ? ` Atención: sin datos en ${vacias.join(", ")}.` : "");
+      return DB;
+    } catch (e) {
+      const m = e.message;
+      const permiso = "No tengo permiso para leer el Sheet. En Google Sheets: Compartir > Acceso general > “Cualquier persona con el enlace” > Lector.";
+      const causa = m === "privado" && scriptUrl() ? "Apps Script no devolvió datos: implementa la aplicación web con acceso “Cualquier persona” y usa la URL que termina en /exec."
+        : m === "privado" || /HTTP (401|403)/.test(m) ? permiso
+        : m.startsWith("RED:") ? `No se pudo leer la pestaña ${m.slice(4)}: puede ser falta de internet o que el Sheet no esté compartido como “Cualquier persona con el enlace” (Lector).` + (location.protocol === "file:" ? " Abre la app desde su enlace web (GitHub Pages) y no desde el archivo descargado." : "")
+        : /HTTP (400|404)/.test(m) ? `Google no encontró lo pedido (${m}). Revisa el ID del Sheet y que la pestaña exista con ese nombre exacto.`
+        : "No se pudo conectar con Google Sheets: " + m;
+      // Respaldo: última copia guardada en este equipo
+      try {
+        const c = JSON.parse(leer("cacheDB") || "null");
+        if (c && c.id === sheetId()) {
+          DB = indexar(c.data); ultimaCarga = 0; poblarListas(DB);
+          $("status").textContent = `${causa} Usando la última copia guardada (${new Date(c.ts).toLocaleString("es-CL")}): ${resumen(DB)}.`;
+          return DB;
+        }
+      } catch (_) {}
+      DB = null; $("status").textContent = causa; throw new Error(causa);
+    } finally { btn.disabled = false; cargando = null; }
+  })();
+  return cargando;
+}
+async function traerDatos() {
+  if (DB && Date.now() - ultimaCarga < REFRESCO_MS) return DB;
+  try { return await sincronizar(); }
+  catch (e) { if (DB) return DB; throw e; }
+}
+
+// ---- Registro automático de códigos nuevos en Cruce_Codigos (vía Apps Script doPost)
+const yaRegistrados = new Set();
+async function registrarNuevos(db, codigos) {
+  const cruceVals = new Set([...db.cruces.values()].map(kcod));
+  const nuevos = new Map();
+  codigos.forEach(c => { const kc = kcod(c); if (kc && !db.cruces.has(kc) && !cruceVals.has(kc) && !yaRegistrados.has(kc) && !nuevos.has(kc)) nuevos.set(kc, k(c)); });
+  if (!nuevos.size) return { n: 0, hallados: 0 };
+  const url = scriptUrl();
+  if (!url) return { n: 0, hallados: 0, sinUrl: nuevos.size };
+  const lista = [...nuevos.values()]; let n = 0, hallados = 0;
+  for (let i = 0; i < lista.length; i += 15) {
+    const res = await fetch(url, { method: "POST", body: JSON.stringify({ accion: "registrar", codigos: lista.slice(i, i + 15) }) });
+    let j; try { j = JSON.parse(await res.text()); } catch (e) { throw new Error("el Apps Script no tiene doPost: pega el código nuevo y crea una nueva versión de la implementación"); }
+    if (!j.ok) throw new Error(j.error || "respuesta inválida");
+    j.resultados.forEach(r => {
+      yaRegistrados.add(kcod(r.original));
+      if (r.estado === "nuevo") { n++; if (r.cruce) { hallados++; db.cruces.set(kcod(r.original), k(r.cruce)); } }
+    });
+  }
+  return { n, hallados };
+}
+async function registrarYAviso(db, codigos) {
+  try {
+    const r = await registrarNuevos(db, codigos);
+    if (r.sinUrl) return ` ${r.sinUrl} código(s) nuevo(s) sin registrar en el Sheet: falta conectar Apps Script.`;
+    if (r.n) return ` ${r.n} código(s) nuevo(s) registrado(s) en Cruce_Codigos (${r.hallados} con equivalente Fleetguard).`;
+    return "";
+  } catch (e) { return " No se pudo registrar códigos nuevos en el Sheet: " + e.message + "."; }
+}
+
+// ---- Plan B: Excel descargado (la librería se carga solo si se necesita)
+function cargarXLSX() {
+  if (typeof XLSX !== "undefined") return Promise.resolve();
+  return new Promise((ok, no) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload = ok; sc.onerror = () => no(new Error("No se pudo cargar el lector de Excel. Revisa tu conexión a internet."));
+    document.head.appendChild(sc);
+  });
+}
+async function cargarArchivo(file) {
+  try {
+    await cargarXLSX();
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    const faltan = TABS.filter(n => !wb.Sheets[n]);
+    if (faltan.length) throw new Error("Faltan pestañas en el archivo: " + faltan.join(", "));
+    const data = {}; TABS.forEach(n => data[n] = XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: "" }));
+    DB = indexar(data); ultimaCarga = Infinity; poblarListas(DB);
+    $("status").textContent = `Base cargada desde archivo (${file.name}): ${resumen(DB)}. Para volver a Google Sheets presiona “Actualizar”.`;
+  } catch (e) { $("status").textContent = e.message; }
+}
+async function plantilla() {
+  try { await cargarXLSX(); } catch (e) { return $("status").textContent = e.message; }
+  const wb = XLSX.utils.book_new();
+  const h = { Cruce_Codigos: ["Codigo_Original","Codigo_Cruce"], Inventario: ["Codigo","Stock_Actual","Precio_Estandar"],
+    Historico_Precios: ["Indicador_Comprador","Codigo","Precio_Historico"], Proveedores: ["Indicador_Comprador","Codigo","RUT_A_Cotizar"] };
+  Object.entries(h).forEach(([n, c]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([c]), n));
+  XLSX.writeFile(wb, "plantilla_cotizaciones.xlsx");
+}
+
+// Convierte las 4 hojas (arreglos de objetos) en índices rápidos
+const g = (r, ...nombres) => { for (const n of nombres) if (n in r && r[n] !== "") return r[n]; return ""; };
+const REQ = {
+  Cruce_Codigos: [["Codigo_Original", ["codigooriginal", "original", "codigo"]], ["Codigo_Cruce", ["codigocruce", "cruce", "codigoequivalente", "equivalente"]]],
+  Inventario: [["Codigo", ["codigo", "codigomaterial", "material", "cod"]], ["Stock_Actual", ["stockactual", "stock", "existencia", "saldo"]]],
+  Historico_Precios: [["Indicador_Comprador", ["indicadorcomprador", "comprador", "indicador"]], ["Codigo", ["codigo", "codigomaterial", "material"]], ["Precio_Historico", ["preciohistorico", "precio", "preciounitario"]]],
+  Proveedores: [["Indicador_Comprador", ["indicadorcomprador", "comprador", "indicador"]], ["RUT_A_Cotizar", ["rutacotizar", "rut", "rutproveedor"]]]
+};
+function indexar(d) {
+  const memo = {};
+  const filas = h => memo[h] ??= (d[h] || []).map(r => Object.fromEntries(Object.entries(r).map(([c, v]) => [norm(c), v])));
+  const db = { cruces: new Map(), inv: new Map(), hist: new Map(), prov: [], compradores: new Set(), diag: [], warn: [] };
+  db.diag = TABS.map(n => { const f = d[n] || []; return `${n}: ${f.length} filas; columnas: ${f.length ? Object.keys(f[0]).join(" | ") : "(sin datos)"}`; });
+
+  // Verifica que cada pestaña tenga las columnas esperadas (Google entrega otra hoja si el nombre no calza)
+  TABS.forEach(n => {
+    const f = filas(n); if (!f.length) return;
+    const claves = new Set(Object.keys(f[0]));
+    REQ[n].forEach(([nombre, alias]) => { if (!alias.some(a => claves.has(a))) db.warn.push(`${n}: no encuentro la columna ${nombre}.`); });
+  });
+  const sinCodigo = (n, alias) => filas(n).filter(r => !kcod(g(r, ...alias)) && Object.values(r).some(v => String(v).trim() !== "")).length;
+
+  filas("Cruce_Codigos").forEach(r => {
+    const o = kcod(g(r, "codigooriginal", "original", "codigo")), c = k(g(r, "codigocruce", "cruce", "codigoequivalente", "equivalente"));
+    if (o && c && !db.cruces.has(o)) db.cruces.set(o, c);
+  });
+  let repetidos = 0;
+  filas("Inventario").forEach(r => {
+    const c = kcod(g(r, "codigo", "codigomaterial", "material", "cod"));
+    if (!c) return;
+    const st = num(g(r, "stockactual", "stock", "existencia", "saldo")), pr = num(g(r, "precioestandar", "precio", "preciounitario", "preciopromedio"));
+    const prev = db.inv.get(c);
+    if (prev) { // código repetido (p. ej. varias bodegas): se suman los stocks
+      repetidos++;
+      prev.stock = prev.stock == null && st == null ? null : (prev.stock || 0) + (st || 0);
+      if (prev.precio == null) prev.precio = pr;
+    } else db.inv.set(c, { stock: st, precio: pr });
+  });
+  filas("Historico_Precios").forEach(r => {
+    const comp = k(g(r, "indicadorcomprador", "comprador", "indicador")), c = kcod(g(r, "codigo", "codigomaterial", "material")), p = num(g(r, "preciohistorico", "precio", "preciounitario"));
+    if (comp && c && p != null) db.hist.set(comp + "|" + c, p);
+    if (comp) db.compradores.add(comp);
+  });
+  filas("Proveedores").forEach(r => {
+    const comp = k(g(r, "indicadorcomprador", "comprador", "indicador")), c = kcod(g(r, "codigo", "codigomaterial", "material")), rut = String(g(r, "rutacotizar", "rut", "rutproveedor")).trim();
+    if (rut) db.prov.push({ comp, cod: c, rut });
+    if (comp) db.compradores.add(comp);
+  });
+  const tip = "si la columna mezcla números y texto, formatéala como “Texto sin formato” en el Sheet";
+  const si = sinCodigo("Inventario", ["codigo", "codigomaterial", "material", "cod"]);
+  if (si) db.warn.push(`Inventario: ${si} filas con datos pero sin código leído (${tip}).`);
+  const sh = sinCodigo("Historico_Precios", ["codigo", "codigomaterial", "material"]);
+  if (sh) db.warn.push(`Historico_Precios: ${sh} filas con datos pero sin código leído (${tip}).`);
+  if (!db.inv.size && (d.Inventario || []).length) db.warn.push("No se reconocieron códigos en Inventario.");
+  if (!db.hist.size && (d.Historico_Precios || []).length) db.warn.push("No se reconocieron precios en Historico_Precios.");
+  if (repetidos) db.diag.push(`Códigos repetidos en Inventario: ${repetidos} (se suman sus stocks).`);
+  db.diag.push("Ejemplo de códigos de Inventario leídos: " + ([...db.inv.keys()].slice(0, 3).join(", ") || "ninguno"));
+  db.diag.push("Ejemplo de compradores leídos: " + ([...db.compradores].slice(0, 3).join(", ") || "ninguno"));
+  return db;
+}
+
+/* =========================================================
+   3. REGLAS DE NEGOCIO
+   ========================================================= */
+// Precio: histórico (comprador+código) -> precio estándar del inventario -> sin precio
+function buscarPrecio(db, comp, cod) {
+  const h = db.hist.get(comp + "|" + cod);
+  if (h != null) return { precio: h, origen: "histórico" };
+  const i = db.inv.get(cod);
+  if (i && i.precio != null) return { precio: i.precio, origen: "estándar" };
+  return { precio: null, origen: "" };
+}
+// RUT: comprador+código -> solo comprador -> solo código -> sin RUT
+function buscarRut(db, comp, cod) {
+  const p = db.prov;
+  const hit = p.find(x => x.comp === comp && x.cod === cod) || p.find(x => x.comp === comp && !x.cod) || p.find(x => !x.comp && x.cod === cod);
+  return hit ? hit.rut : "";
+}
+// El comprador puede venir como texto largo ("NOMBRE, FONO..., MAIL..."): busca el indicador del Sheet dentro del texto
+function resolverComp(db, comp) {
+  if (!comp || db.compradores.has(comp)) return comp;
+  const n = norm(comp); let mejor = "", lm = 0;
+  db.compradores.forEach(c => { const nc = norm(c); if (nc.length >= 3 && n.includes(nc) && nc.length > lm) { mejor = c; lm = nc.length; } });
+  if (!mejor && n.length >= 3) db.compradores.forEach(c => { if (!mejor && norm(c).includes(n)) mejor = c; }); // el usuario escribió solo una parte
+  return mejor || comp;
+}
+function fila(db, s, cod, tipo, esCruce) {
+  const kc = kcod(cod), ck = resolverComp(db, s.comp);
+  const inv = db.inv.get(kc), p = buscarPrecio(db, ck, kc);
+  return {
+    sol: s.sol, fecha: s.fecha, faena: s.faena, comp: s.comp, tipo, esCruce, cod, cant: s.cant,
+    stock: inv ? inv.stock : null, enInv: !!inv,
+    precio: p.precio, origen: p.origen, total: p.precio != null ? p.precio * s.cant : null,
+    rut: buscarRut(db, ck, kc)
+  };
+}
+// Una solicitud genera la línea original y, si existe equivalencia, la línea del cruce
+function procesar(db, s) {
+  const out = [fila(db, s, s.cod, "Original", false)];
+  const cruce = db.cruces.get(kcod(s.cod)), tipo = "Código Cruce de " + s.cod;
+  if (cruce) out.push(fila(db, s, cruce, tipo, true));
+  else out.push({ sol: s.sol, fecha: s.fecha, faena: s.faena, comp: s.comp, tipo, esCruce: true, cod: "SIN CRUCE", cant: s.cant, stock: null, enInv: false, precio: null, origen: "", total: null, rut: "" });
+  return out;
+}
+
+/* =========================================================
+   4. INTERFAZ
+   ========================================================= */
+let resultados = [];
+try { const r = JSON.parse(leer("resultados") || "[]"); if (Array.isArray(r)) resultados = r.filter(x => x && typeof x.fecha === "string" && typeof x.cod === "string"); } catch (e) {}
+const guardarResultados = () => guardar("resultados", JSON.stringify(resultados.slice(-5000)));
+
+let verTodo = false;
+const DMY = f => String(f.fecha).split("-").reverse().join("-");
+const esSinCruce = f => kcod(f.cod) === "SINCRUCE";
+const origenDe = f => f.esCruce ? String(f.tipo).replace(/^Código Cruce de /, "") : f.cod;
+// Vista por defecto: solo códigos cruce con stock (y "Sin cruce" para los que no tienen equivalencia)
+const visible = f => verTodo || (f.esCruce && (esSinCruce(f) || (f.enInv && f.stock > 0)));
+const ENC_TODO = ["Nº Solicitud", "Fecha", "Faena", "Comprador", "Tipo de Registro", "Stock", "Código", "Cantidad", "Precio Unitario", "Valor Total", "RUT a Cotizar"];
+const ENC_VISTA = ["Nº Solicitud", "Fecha", "Faena", "Comprador", "Código Original", "Stock", "Código Cruce", "Cantidad", "Precio Unitario", "Valor Total", "RUT a Cotizar"];
+function filaPlana(f) {
+  if (verTodo) return [f.sol, DMY(f), f.faena, f.comp, f.tipo, f.enInv ? f.stock : "No existe", f.cod, f.cant, f.precio, f.total, f.rut];
+  if (esSinCruce(f)) return [f.sol, DMY(f), f.faena, f.comp, origenDe(f), "", "Sin cruce", f.cant, "", "", ""];
+  return [f.sol, DMY(f), f.faena, f.comp, origenDe(f), f.stock, f.cod, f.cant, f.precio, f.total, f.rut];
+}
+function setRes(t, cls) { $("msg-res").textContent = t; $("msg-res").className = "msg " + (cls || ""); }
+
+function pintar() {
+  guardarResultados();
+  verTodo = $("chk-todo").checked;
+  $("head").innerHTML = "<tr>" + (verTodo ? ENC_TODO : ENC_VISTA).map((h, i) => `<th${[5, 7, 8, 9].includes(i) ? ' class="num"' : ""}>${h}</th>`).join("") + "</tr>";
+  const vis = resultados.filter(visible);
+  setRes(resultados.length ? `Mostrando ${vis.length} de ${resultados.length} registros.` + (verTodo ? "" : " Se ocultan los códigos originales y los cruces sin stock (marca “Ver todo” para verlos).") : "");
+  if (!vis.length) {
+    $("rows").innerHTML = `<tr><td colspan="11" class="empty">${resultados.length ? "Ningún registro con código cruce y stock. Marca “Ver todo” para ver el detalle." : "Sin registros. Completa el formulario y presiona “Procesar solicitud”."}</td></tr>`;
+    return;
+  }
+  const mny = x => x == null || x === "" ? "" : money(x);
+  $("rows").innerHTML = vis.map(f => {
+    if (!verTodo) { // vista limpia: solo texto, para copiar y pegar sin formato
+      const v = filaPlana(f);
+      return `<tr><td class="mono">${esc(v[0])}</td><td>${esc(v[1])}</td><td>${esc(v[2])}</td><td>${esc(v[3])}</td><td class="mono">${esc(v[4])}</td>
+      <td class="num">${v[5] == null || v[5] === "" ? "" : nf(v[5])}</td><td class="mono">${esc(v[6])}</td><td class="num">${nf(v[7])}</td>
+      <td class="num">${mny(v[8])}</td><td class="num">${mny(v[9])}</td><td class="mono">${esc(v[10] || "")}</td></tr>`;
+    }
+    const stock = !f.enInv ? `<span class="na" title="El código no existe en la hoja Inventario">No existe</span>`
+      : (f.stock != null && f.stock < f.cant ? `<span class="low" title="Stock menor a la cantidad solicitada">${nf(f.stock)}</span>` : (f.stock == null ? "—" : nf(f.stock)));
+    const precio = f.precio == null ? `<span class="na">Sin precio</span>` : money(f.precio) + `<span class="note">${f.origen}</span>`;
+    return `<tr class="${f.esCruce ? "cruce" : ""}">
+      <td class="mono">${esc(f.sol)}</td><td>${esc(DMY(f))}</td><td>${esc(f.faena)}</td><td>${esc(f.comp)}</td>
+      <td class="${f.esCruce ? "indent" : ""}"><span class="tag ${f.esCruce ? "c" : ""}">${f.esCruce ? "↳ " : ""}${esc(f.tipo)}</span></td>
+      <td class="num">${stock}</td><td class="mono">${esc(f.cod)}</td><td class="num">${nf(f.cant)}</td>
+      <td class="num">${precio}</td><td class="num">${f.total == null ? "—" : money(f.total)}</td>
+      <td class="mono">${f.rut ? esc(f.rut) : `<span class="na">Sin RUT definido</span>`}</td></tr>`;
+  }).join("");
+}
+
+function poblarListas(db) {
+  if ($("diag")) $("diag").textContent = db.diag.join("\n");
+  $("compradores").innerHTML = [...db.compradores].sort().map(c => `<option value="${esc(c)}">`).join("");
+}
+function poblarFaenas() {
+  const f = [...new Set(resultados.map(r => r.faena))];
+  $("faenas").innerHTML = f.map(x => `<option value="${esc(x)}">`).join("");
+}
+
+async function ejecutar() {
+  const s = { cant: num($("cant").value), cod: k($("cod").value), sol: $("sol").value.trim(), fecha: $("fecha").value, faena: $("faena").value.trim(), comp: k($("comp").value) };
+  if (!(s.cant > 0)) return msg("La cantidad debe ser mayor a 0.", "err");
+  if (!s.cod) return msg("Ingresa el código de material.", "err");
+  if (!s.sol) return msg("Ingresa el número de solicitud.", "err");
+  if (!s.fecha) return msg("Selecciona una fecha.", "err");
+  if (!s.faena) return msg("Ingresa la faena de despacho.", "err");
+  if (!s.comp) return msg("Ingresa el comprador o indicador.", "err");
+  const btn = $("btn-run"); btn.disabled = true; msg("Procesando…");
+  try {
+    const db = await traerDatos();
+    poblarListas(db);
+    msg("Procesando… (si el código es nuevo, se busca su equivalente y se registra en el Sheet)");
+    const aviso = await registrarYAviso(db, [s.cod]);
+    const nuevas = procesar(db, s);
+    resultados.push(...nuevas);
+    poblarFaenas(); pintar();
+    msg(esSinCruce(nuevas[1]) ? "Solicitud procesada: sin código cruce." : `Solicitud procesada con código cruce ${nuevas[1].cod}` + (nuevas[1].enInv && nuevas[1].stock > 0 ? "." : " (sin stock: no aparece en la vista por defecto)."), "ok");
+    if (aviso) msg($("msg").textContent + aviso, "ok");
+    $("cod").value = ""; $("sol").value = "";
+  } catch (e) { msg(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
+
+// Celda en texto plano: coma decimal (Excel en español) y sin riesgo de fórmulas
+function celda(v) {
+  if (v == null) return "";
+  if (typeof v === "number") return String(v).replace(".", ",");
+  v = String(v);
+  return /^[=+@]|^-(?!\d)/.test(v) ? "'" + v : v;
+}
+function datosVista() {
+  const vis = resultados.filter(visible);
+  return { enc: verTodo ? ENC_TODO : ENC_VISTA, filas: vis.map(filaPlana) };
+}
+function exportarCSV() {
+  const { enc, filas } = datosVista();
+  if (!filas.length) return setRes("No hay registros para exportar.", "err");
+  const c = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const blob = new Blob(["\ufeff" + [enc, ...filas].map(r => r.map(v => c(celda(v))).join(";")).join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "cotizaciones.csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 500);
+}
+// Copia la tabla visible como texto separado por tabulaciones: se pega en Excel o Sheets sin colores ni formato
+async function copiarTabla() {
+  const { enc, filas } = datosVista();
+  if (!filas.length) return setRes("No hay registros para copiar.", "err");
+  const txt = [enc, ...filas].map(r => r.map(v => celda(v).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+  try { await navigator.clipboard.writeText(txt); }
+  catch (e) { const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } finally { ta.remove(); } }
+  setRes(`Tabla copiada (${filas.length} filas con encabezados). Pégala en Excel o Google Sheets con Ctrl+V.`, "ok");
+}
+
+/* =========================================================
+   5. CARGA MASIVA (TABLA EDITABLE)
+   ========================================================= */
+const COLS = [
+  { t: "Cantidad", ph: "1" }, { t: "Código material", ph: "MAT-1001" }, { t: "Nº solicitud" },
+  { t: "Fecha", ph: "dd-mm-aaaa" }, { t: "Faena despacho", list: "faenas" }, { t: "Comprador", list: "compradores" }
+];
+function setBulk(t, cls) { $("msg-bulk").textContent = t; $("msg-bulk").className = "msg " + (cls || ""); }
+function hoy() { const d = new Date(); return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`; }
+function fechaValida(y, mo, d) {
+  y = +y; mo = +mo; d = +d;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return "";
+  return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+// Acepta dd-mm-aaaa, dd/mm/aaaa, aaaa-mm-dd y número de serie de Excel
+function fechaISO(v) {
+  if (v == null || v === "") return "";
+  if (typeof v === "number") return v > 20000 && v < 80000 ? new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10) : "";
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+  if (m) return fechaValida(m[1], m[2], m[3]);
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/);
+  if (m) return fechaValida(m[3].length === 2 ? "20" + m[3] : m[3], m[2], m[1]);
+  if (/^\d{5}$/.test(s)) return fechaISO(Number(s));
+  return "";
+}
+function validar(s) {
+  const e = [];
+  if (!(s.cant > 0)) e.push("cantidad inválida");
+  if (!s.cod) e.push("falta código");
+  if (!s.sol) e.push("falta Nº solicitud");
+  if (!s.fecha) e.push("fecha inválida");
+  if (!s.faena) e.push("falta faena");
+  if (!s.comp) e.push("falta comprador");
+  return e;
+}
+function nuevaFila(vals = []) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = COLS.map((c, i) => `<td><input data-c="${i}" ${c.list ? `list="${c.list}"` : ""} placeholder="${esc(c.ph || "")}" autocomplete="off" aria-label="${esc(c.t)}" value="${esc(vals[i] ?? (i === 3 ? hoy() : ""))}"></td>`).join("")
+    + `<td><button class="x" title="Quitar fila" aria-label="Quitar fila">✕</button></td>`;
+  $("grid-body").appendChild(tr);
+  return tr;
+}
+function vaciarTabla(n = 5) { $("grid-body").innerHTML = ""; for (let i = 0; i < n; i++) nuevaFila(); }
+const valoresFila = tr => [...tr.querySelectorAll("input")].map(x => x.value.trim());
+
+// Procesa solicitudes ya validadas por fila; devuelve las filas (tr) que quedaron bien
+async function procesarSolicitudes(sols) {
+  const db = await traerDatos(); poblarListas(db);
+  const aviso = await registrarYAviso(db, sols.filter(s => !validar(s).length).map(s => s.cod));
+  let ok = 0, cruces = 0; const malas = [], buenas = new Set();
+  sols.forEach(s => {
+    const e = validar(s);
+    if (e.length) { malas.push(`Fila ${s.fila}: ${e.join(", ")}`); return; }
+    const nuevas = procesar(db, s); resultados.push(...nuevas); ok++; if (!esSinCruce(nuevas[1])) cruces++; buenas.add(s);
+  });
+  poblarFaenas(); pintar();
+  $("bulk-errs").innerHTML = malas.slice(0, 15).map(x => `<li>${esc(x)}</li>`).join("") + (malas.length > 15 ? `<li>… y ${malas.length - 15} filas más con error.</li>` : "");
+  if (!ok) setBulk(`No se procesó ninguna fila: ${malas.length} con errores.`, "err");
+  else setBulk(`${ok} solicitudes procesadas (${cruces} con código cruce)` + (malas.length ? `; ${malas.length} filas con errores quedaron en la tabla para corregir.` : ".") + aviso, malas.length ? "" : "ok");
+  return buenas;
+}
+async function procesarTabla() {
+  const sols = [];
+  [...$("grid-body").children].forEach((tr, i) => {
+    const v = valoresFila(tr); tr.classList.remove("bad");
+    if (![0, 1, 2, 4, 5].some(j => v[j])) return; // fila vacía (solo trae la fecha por defecto)
+    sols.push({ fila: i + 1, tr, cant: num(v[0]), cod: k(v[1]), sol: v[2], fecha: fechaISO(v[3]), faena: v[4], comp: k(v[5]) });
+  });
+  if (!sols.length) return setBulk("La tabla está vacía. Escribe o pega al menos una fila.", "err");
+  const btn = $("btn-bulk"); btn.disabled = true; $("bulk-errs").innerHTML = ""; setBulk("Procesando…");
+  try {
+    const buenas = await procesarSolicitudes(sols);
+    sols.forEach(s => buenas.has(s) ? s.tr.remove() : s.tr.classList.add("bad"));
+    if (!$("grid-body").children.length) vaciarTabla(5);
+  } catch (e) { setBulk(e.message, "err"); }
+  finally { btn.disabled = false; }
+}
+
+// Pegar desde Excel / Google Sheets: reparte el contenido en filas y columnas
+$("grid-body").addEventListener("paste", e => {
+  const inp = e.target.closest && e.target.closest("input"); if (!inp) return;
+  const t = ((e.clipboardData || window.clipboardData).getData("text") || "").replace(/\r?\n$/, "");
+  if (!/[\t\n]/.test(t)) return; // un solo valor: pegado normal
+  e.preventDefault();
+  const c0 = +inp.dataset.c; let rows = parseCSV(t, "\t");
+  if (c0 === 0 && rows.length && ["cantidad", "cant"].includes(norm(rows[0][0]))) rows = rows.slice(1); // ignora encabezados copiados
+  let cur = inp.closest("tr");
+  rows.forEach((vals, ri) => {
+    if (ri > 0) cur = cur.nextElementSibling || nuevaFila();
+    vals.forEach((v, ci) => { const f = cur.querySelector(`[data-c="${c0 + ci}"]`); if (f) f.value = v.trim(); });
+  });
+});
+// Enter baja a la fila siguiente (misma columna)
+$("grid-body").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !e.target.matches("input")) return;
+  e.preventDefault();
+  const tr = e.target.closest("tr"), nx = tr.nextElementSibling || nuevaFila();
+  nx.querySelector(`[data-c="${e.target.dataset.c}"]`).focus();
+});
+$("grid-body").addEventListener("click", e => {
+  if (!e.target.classList.contains("x")) return;
+  const tr = e.target.closest("tr");
+  if ($("grid-body").children.length === 1) { tr.querySelectorAll("input").forEach((x, i) => x.value = i === 3 ? hoy() : ""); tr.classList.remove("bad"); }
+  else tr.remove();
+});
+$("btn-bulk").onclick = procesarTabla;
+$("btn-addrow").onclick = () => nuevaFila().querySelector("input").focus();
+$("btn-bulk-clear").onclick = () => { vaciarTabla(5); setBulk(""); $("bulk-errs").innerHTML = ""; };
+vaciarTabla(5);
+
+function probarCodigo() {
+  const out = $("probe-out"), raw = $("probe").value, c = kcod(raw);
+  if (!DB) return out.textContent = "Aún no hay base cargada.";
+  if (!c) return out.textContent = "Escribe un código.";
+  const cola = c.slice(-5), parecidos = it => [...it].filter(x => x.includes(cola)).slice(0, 5).join(", ") || "ninguno";
+  const inv = DB.inv.get(c), cr = DB.cruces.get(c);
+  const inverso = [...DB.cruces].filter(([, x]) => kcod(x) === c).map(([o]) => o);
+  const h = [...DB.hist].filter(([key]) => key.endsWith("|" + c)).map(([key, v]) => key.split("|")[0] + " = " + v);
+  out.textContent = [
+    `Código buscado: ${raw}  →  clave de comparación: ${c}`,
+    `Inventario: ${inv ? `ENCONTRADO (stock ${inv.stock ?? "vacío"}, precio estándar ${inv.precio ?? "vacío"})` : "NO encontrado"}. Parecidos: ${parecidos(DB.inv.keys())}`,
+    `Cruce_Codigos como original: ${cr ? "ENCONTRADO → " + cr : "NO encontrado"}. Parecidos: ${parecidos(DB.cruces.keys())}`,
+    `Cruce_Codigos como código cruce (columnas al revés): ${inverso.length ? inverso.join(", ") : "no aparece"}`,
+    `Historico_Precios: ${h.length ? h.slice(0, 5).join("; ") : "NO encontrado"}`,
+    `Proveedores con este código: ${DB.prov.filter(x => x.cod === c).length}`
+  ].join("\n");
+}
+$("btn-probe").onclick = probarCodigo;
+$("probe").addEventListener("keydown", e => { if (e.key === "Enter") probarCodigo(); });
+$("btn-sync").onclick = () => sincronizar().catch(() => {});
+$("btn-saveid").onclick = () => { guardar("sheetId", idDesdeTexto($("sheetid").value)); ultimaCarga = 0; sincronizar().catch(() => {}); };
+$("sheetid").value = sheetId();
+$("file").onchange = e => e.target.files[0] && cargarArchivo(e.target.files[0]);
+$("btn-plantilla").onclick = plantilla;
+$("btn-run").onclick = ejecutar;
+$("btn-csv").onclick = exportarCSV;
+$("btn-clear").onclick = () => { resultados = []; msg("Registros eliminados.", "ok"); pintar(); };
+$("chk-todo").onchange = pintar;
+$("btn-copy").onclick = copiarTabla;
+$("scripturl").value = leer("scriptUrl") || "";
+$("btn-savescript").onclick = () => {
+  const u = $("scripturl").value.trim();
+  if (u && !/^https:\/\/script\.google\.com\/.*\/exec/.test(u)) { $("status").textContent = "La URL debe empezar con https://script.google.com/ y terminar en /exec."; return; }
+  guardar("scriptUrl", u); ultimaCarga = 0; sincronizar().catch(() => {});
+};
+$("btn-clearscript").onclick = () => { guardar("scriptUrl", ""); $("scripturl").value = ""; ultimaCarga = 0; sincronizar().catch(() => {}); };
+$("btn-copygs").onclick = async () => {
+  try { await navigator.clipboard.writeText($("gs-code").textContent); $("btn-copygs").textContent = "¡Copiado!"; }
+  catch (e) { const r = document.createRange(); r.selectNodeContents($("gs-code")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); $("btn-copygs").textContent = "Selecciona y copia con Ctrl+C"; }
+};
+["cant","cod","sol","faena","comp"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") ejecutar(); }));
+
+// Inicio: restaura configuración guardada y rellena la lista de compradores
+{ const d = new Date(); $("fecha").value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; } // hora local (valueAsDate usa UTC y puede dar el día siguiente)
+poblarFaenas(); pintar();
+sincronizar().catch(() => {});
+</script>
+</body>
+</html>
